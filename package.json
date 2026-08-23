@@ -1,0 +1,53 @@
+{
+  "name": "funnelkeeper",
+  "version": "0.2.0",
+  "description": "CLI and MCP server for the FunnelKeeper growth and revenue API",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://funnelkeeper.com/docs/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ae-labs-inc/funnelkeeper-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ae-labs-inc/funnelkeeper-client/issues"
+  },
+  "keywords": [
+    "funnelkeeper",
+    "analytics",
+    "cli",
+    "mcp",
+    "marketing"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "bin": {
+    "fk": "dist/cli/index.js",
+    "funnelkeeper": "dist/cli/index.js",
+    "funnelkeeper-mcp": "dist/mcp/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "^5.5.4"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
