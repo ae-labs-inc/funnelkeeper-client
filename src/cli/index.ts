@@ -322,7 +322,7 @@ async function main(): Promise<void> {
     }
 
     case "connect": {
-      const source = positionals[0] ?? fail("which source? ga4 | gtm | google-ads | gsc | google-sa | semrush | clarity | posthog | opinly | bing | ahrefs");
+      const source = positionals[0] ?? fail("which source? ga4 | gtm | google-ads | gsc | google-sa | semrush | clarity | posthog | opinly | bing | ahrefs | meta-ads | linkedin-ads | meta-social | x-social | stripe");
       const product = flags.product ? String(flags.product) : fail("--product is required");
       const { api } = needAuth();
 
@@ -382,6 +382,104 @@ async function main(): Promise<void> {
         const domain = await ask("domain to track (e.g. example.com): ");
         await api.post(`/products/${product}/connections/ahrefs`, { api_key: key, domain });
         console.log("ahrefs connected. snapshots run weekly — units deplete, so no test call is made after connect.");
+        return;
+      }
+
+      if (source === "meta" || source === "meta-oauth") {
+        const start = await api.post<{ state: string; auth_url: string; expires_at: string }>(
+          "/connect/meta/start", { product_slug: product, kinds: ["meta_ads", "meta_social"], client: "cli" });
+        console.log(`\nopen this url to connect Meta for ${product}:\n\n  ${start.auth_url}\n`);
+        openBrowser(start.auth_url);
+        process.stdout.write("waiting for authorization … (ctrl-c to cancel)\n");
+        const deadline = new Date(start.expires_at).getTime();
+        let interval = 2000;
+        const t0 = Date.now();
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, interval));
+          if (Date.now() - t0 > 30_000) interval = 5000;
+          const s = await api.get<{ status: string; error?: string; results?: unknown; options?: Record<string, unknown> }>(
+            `/connect/meta/status?state=${encodeURIComponent(start.state)}`);
+          if (s.status === "pending") continue;
+          if (s.status === "error") fail(`authorization failed: ${s.error}`);
+
+          const options = s.options ?? {};
+          const select: Record<string, string> = { state: start.state };
+          const accounts = (options.meta_ad_accounts ?? []) as Array<{ id: string; name: string; currency: string }>;
+          if (accounts.length > 0) {
+            select.ad_account_id = accounts.length === 1 ? accounts[0].id : await pick("meta ad account", accounts.map((a) => `${a.name} (${a.currency})`), accounts.map((a) => a.id));
+          }
+          const pages = (options.meta_pages ?? []) as Array<{ id: string; name: string; instagram_name?: string }>;
+          if (pages.length > 0) {
+            select.page_id = pages.length === 1 ? pages[0].id : await pick("facebook page", pages.map((p) => p.instagram_name ? `${p.name} (@${p.instagram_name})` : p.name), pages.map((p) => p.id));
+          }
+          const done = await api.post<{ activated: string[] }>("/connect/meta/select", select);
+          console.log(`${done.activated.join(", ")} connected.`);
+          return;
+        }
+        fail("authorization window expired. run the command again.");
+      }
+
+      if (source === "meta-ads" || source === "meta_ads") {
+        const token = await askHidden("meta access token (ads_read): ");
+        const accountId = (await ask("ad account id (numeric, blank to discover): ")).trim();
+        const res = await api.post<{ connection_id: string | null; accounts?: Array<{ id: string; name: string }> }>(
+          `/products/${product}/connections/meta-ads`,
+          { access_token: token, ad_account_id: accountId || undefined });
+        if (!res.connection_id && res.accounts?.length) {
+          console.log("pick an ad account and run again with its id:");
+          for (const a of res.accounts) console.log(`  ${a.id}  ${a.name}`);
+          return;
+        }
+        console.log(`meta ads connected. fk connect sync meta-ads --product ${product} runs it now.`);
+        return;
+      }
+
+      if (source === "linkedin-ads" || source === "linkedin_ads") {
+        const token = await askHidden("linkedin access token (r_ads, r_ads_reporting): ");
+        const accountId = (await ask("ad account id (numeric, blank to discover): ")).trim();
+        const res = await api.post<{ connection_id: string | null; accounts?: Array<{ id: string; name: string }> }>(
+          `/products/${product}/connections/linkedin-ads`,
+          { access_token: token, ad_account_id: accountId || undefined });
+        if (!res.connection_id && res.accounts?.length) {
+          console.log("pick an ad account and run again with its id:");
+          for (const a of res.accounts) console.log(`  ${a.id}  ${a.name}`);
+          return;
+        }
+        console.log(`linkedin ads connected. fk connect sync linkedin-ads --product ${product} runs it now.`);
+        return;
+      }
+
+      if (source === "meta-social" || source === "meta_social") {
+        const token = await askHidden("meta user token (pages_show_list, pages_read_engagement): ");
+        const pageId = (await ask("facebook page id (blank to discover): ")).trim();
+        const res = await api.post<{ connection_id: string | null; pages?: Array<{ id: string; name: string }> }>(
+          `/products/${product}/connections/meta-social`,
+          { access_token: token, page_id: pageId || undefined });
+        if (!res.connection_id && res.pages?.length) {
+          console.log("pick a page and run again with its id:");
+          for (const p of res.pages) console.log(`  ${p.id}  ${p.name}`);
+          return;
+        }
+        console.log(`meta social connected. fk connect sync meta-social --product ${product} runs it now.`);
+        return;
+      }
+
+      if (source === "x-social" || source === "x_social") {
+        const token = await askHidden("x api v2 bearer token: ");
+        const username = await ask("x username (without @): ");
+        await api.post(`/products/${product}/connections/x-social`, { bearer_token: token, username });
+        console.log(`x social connected. fk connect sync x-social --product ${product} runs it now.`);
+        return;
+      }
+
+      if (source === "stripe") {
+        const key = await askHidden("stripe restricted or secret key (rk_live_… / sk_live_…): ");
+        const stageRaw = (await ask("funnel stage for successful charges [converted]: ")).trim().toLowerCase();
+        const default_stage = stageRaw === "payment" ? "payment" : undefined;
+        await api.post(`/products/${product}/connections/stripe`, { api_key: key, default_stage });
+        console.log(
+          `stripe connected. charges become ${default_stage ?? "converted"} events + revenue —\n`
+          + `  fk connect sync stripe --product ${product} runs it now.`);
         return;
       }
 
@@ -508,7 +606,7 @@ async function main(): Promise<void> {
     case "connect test": {
       const source = positionals[0] ?? fail("which source?");
       const product = flags.product ? String(flags.product) : fail("--product is required");
-      const kind = source === "google-ads" ? "google_ads" : source;
+      const kind = source === "google-ads" ? "google_ads" : source.replace(/-/g, "_");
       const { api } = needAuth();
       const res = await api.post<{ ok: boolean; detail: string }>(`/products/${product}/connections/${kind}/test`);
       console.log(`${res.ok ? "ok" : "failed"} — ${res.detail}`);
@@ -516,7 +614,7 @@ async function main(): Promise<void> {
     }
     // eslint-disable-next-line no-fallthrough
     case "connect sync": {
-      const source = positionals[0] ?? fail("which source?");
+      const source = (positionals[0] ?? fail("which source?")).replace(/-/g, "_");
       const product = flags.product ? String(flags.product) : fail("--product is required");
       const { api } = needAuth();
       const res = await api.post<{ detail: string }>(`/products/${product}/connections/${source}/sync`);
@@ -536,6 +634,11 @@ async function main(): Promise<void> {
           email: flags.email ? String(flags.email) : undefined,
           external_id: flags["external-id"] ? String(flags["external-id"]) : undefined,
         };
+      }
+      if (flags.score !== undefined) {
+        const rawScore = String(flags.score).trim();
+        const num = Number(rawScore);
+        event.score = Number.isFinite(num) && rawScore !== "" ? num : rawScore;
       }
       if (flags.cents !== undefined) {
         event.value = {
@@ -704,6 +807,33 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "social": {
+      const product = flags.product ? String(flags.product) : fail("--product is required");
+      const days = Number(flags.days ?? 30);
+      const { api } = needAuth();
+      const r = await api.get<{
+        audience: { followers: number; impressions: number; engagements: number; engagement_rate: number | null };
+        networks: Array<{ label: string; connected: boolean; followers: number }>;
+        posts: Array<{ source: string; content_text: string | null; likes: number; impressions: number; engagement_rate: number | null }>;
+      }>(`/products/${product}/social?days=${days}`);
+      console.log(`followers ${r.audience.followers.toLocaleString()}  impressions ${r.audience.impressions.toLocaleString()}  engagements ${r.audience.engagements.toLocaleString()}`
+        + (r.audience.engagement_rate != null ? `  rate ${(r.audience.engagement_rate * 100).toFixed(1)}%` : ""));
+      for (const n of r.networks) {
+        console.log(`  ${n.connected ? "●" : "○"} ${n.label}  ${n.followers.toLocaleString()} followers`);
+      }
+      if (r.posts.length === 0) return void console.log("no posts yet. connect Meta Social or X and sync.");
+      console.log(table(
+        ["source", "likes", "impr", "rate", "text"],
+        r.posts.slice(0, 10).map((p) => [
+          p.source === "x_social" ? "x" : "meta",
+          String(p.likes),
+          String(p.impressions),
+          p.engagement_rate == null ? "—" : `${(p.engagement_rate * 100).toFixed(1)}%`,
+          (p.content_text ?? "").replace(/\s+/g, " ").slice(0, 50),
+        ])));
+      return;
+    }
+
     case "growth": {
       const product = flags.product ? String(flags.product) : fail("--product is required");
       const days = Number(flags.days ?? 30);
@@ -743,6 +873,64 @@ async function main(): Promise<void> {
         `/products/${product}/growth-actions/${encodeURIComponent(id)}/prompt`,
         { tool, days });
       console.log(r.prompt);
+      return;
+    }
+
+    case "scorecard": {
+      const product = flags.product ? String(flags.product) : fail("--product is required");
+      const weeks = Number(flags.weeks ?? 12);
+      const { api } = needAuth();
+      const r = await api.get<{
+        weeks: Array<{ label: string; week_start: string }>;
+        sections: Array<{
+          label: string;
+          metrics: Array<{
+            key: string; label: string; format: string; wow: number | null;
+            values: Array<{ week_start: string; value: number | null }>;
+          }>;
+        }>;
+      }>(`/products/${product}/scorecard?weeks=${weeks}`);
+      const header = ["metric", ...r.weeks.map((w) => w.label), "wow"];
+      const rows: string[][] = [];
+      for (const s of r.sections) {
+        rows.push([s.label.toUpperCase(), ...r.weeks.map(() => ""), ""]);
+        for (const m of s.metrics) {
+          rows.push([
+            m.label,
+            ...m.values.map((c) => c.value == null ? "—" : String(c.value)),
+            m.wow == null ? "—" : `${(m.wow * 100).toFixed(1)}%`,
+          ]);
+        }
+      }
+      console.log(table(header, rows));
+      return;
+    }
+
+    case "scorecard set": {
+      const product = flags.product ? String(flags.product) : fail("--product is required");
+      const metric = flags.metric ? String(flags.metric) : fail("--metric is required");
+      const week = flags.week ? String(flags.week) : fail("--week is required (ISO Monday YYYY-MM-DD)");
+      const value = flags.value === undefined ? fail("--value is required") : Number(flags.value);
+      const { api } = needAuth();
+      await api.post(`/products/${product}/scorecard/values`, {
+        cells: [{ metric_key: metric, week_start: week, value }],
+      });
+      console.log(`set ${metric} ${week} = ${value}`);
+      return;
+    }
+
+    case "scorecard export": {
+      const product = flags.product ? String(flags.product) : fail("--product is required");
+      const weeks = Number(flags.weeks ?? 12);
+      const { api } = needAuth();
+      const csv = await api.get<string>(`/products/${product}/scorecard/export.csv?weeks=${weeks}`);
+      if (flags.out) {
+        const { writeFileSync } = await import("node:fs");
+        writeFileSync(String(flags.out), typeof csv === "string" ? csv : String(csv));
+        console.log(`wrote ${flags.out}`);
+      } else {
+        console.log(typeof csv === "string" ? csv : String(csv));
+      }
       return;
     }
 

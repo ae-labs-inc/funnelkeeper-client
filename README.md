@@ -22,7 +22,29 @@ See the complete [CLI reference](https://funnelkeeper.com/docs/cli/).
 
 ## MCP server
 
-Add FunnelKeeper to Claude Code:
+### Cursor (1-Click Install)
+
+Click the link below to install the FunnelKeeper MCP server directly in Cursor:
+
+[Add to Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=funnelkeeper&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIi0tcGFja2FnZSIsImZ1bm5lbGtlZXBlciIsImZ1bm5lbGtlZXBlci1tY3AiXSwiZW52Ijp7IkZVTk5FTEtFRVBFUl9BUElfS0VZIjoiJHtlbnY6RlVOTkVMS0VFUEVSX0FQSV9LRVl9In19)
+
+Or add FunnelKeeper to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project-scoped):
+
+```json
+{
+  "mcpServers": {
+    "funnelkeeper": {
+      "command": "npx",
+      "args": ["-y", "--package", "funnelkeeper", "funnelkeeper-mcp"],
+      "env": {
+        "FUNNELKEEPER_API_KEY": "${env:FUNNELKEEPER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
 
 ```bash
 claude mcp add funnelkeeper \
@@ -30,7 +52,7 @@ claude mcp add funnelkeeper \
   -- npx -y --package funnelkeeper funnelkeeper-mcp
 ```
 
-Or configure any stdio MCP client:
+### Other stdio MCP clients
 
 ```json
 {

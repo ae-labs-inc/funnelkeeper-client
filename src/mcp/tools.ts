@@ -21,7 +21,7 @@ export type ToolDef = {
   destructive?: boolean;
 };
 
-const slug = z.string().describe("Product slug, e.g. 'demo-product'.");
+const slug = z.string().describe("Project slug, e.g. 'demo-product'.");
 const actor = z.string().min(1).describe(
   "The human operator's name or email. Ask the user for it; never supply a model name or invent one. Written to the audit log as resolved_by.");
 
@@ -47,7 +47,7 @@ export const tools: ToolDef[] = [
   {
     name: "get_billing",
     description:
-      "Current workspace plan, trial days left, usage vs limits (products, seats, events, AI analyses), and whether Stripe checkout is available. The workspace holds one plan; each product is free for its own 30 days and then adds one unit of subscription quantity — product_lines shows where each one stands. 402 plan_limit errors from other tools mean this plan is the ceiling — upgrade via the dashboard Billing screen.",
+      "Current workspace plan, trial days left, usage vs limits (projects, seats, events, AI analyses), and whether Stripe checkout is available. The workspace holds one plan; each project is free for its own 30 days and then adds one unit of subscription quantity — product_lines shows where each one stands. 402 plan_limit errors from other tools mean this plan is the ceiling — upgrade via the dashboard Billing screen.",
     input: z.object({}),
     method: "GET", path: () => "/billing", readOnly: true,
   },
@@ -85,19 +85,19 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_portfolio",
-    description: "One row per product: spend 7d/30d, visitors, leads, revenue, customers, CAC, LTV:CAC, gate status, pending card count.",
+    description: "One row per project: spend 7d/30d, visitors, leads, revenue, customers, CAC, LTV:CAC, gate status, pending card count.",
     input: z.object({}),
     method: "GET", path: () => "/portfolio", readOnly: true,
   },
   {
     name: "get_product",
-    description: "A single product's portfolio row.",
+    description: "A single project's portfolio row.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}`, readOnly: true,
   },
   {
     name: "get_funnel",
-    description: "Funnel stage × channel volumes for a product.",
+    description: "Funnel stage × channel volumes for a project.",
     input: z.object({ slug, days: z.number().int().positive().max(365).default(30) }),
     method: "GET", path: (a) => `/products/${a.slug}/funnel?days=${a.days ?? 30}`, readOnly: true,
   },
@@ -127,7 +127,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "create_product",
-    description: "Create a product in the authenticated account.",
+    description: "Create a project in the authenticated account.",
     input: z.object({
       name: z.string().min(1).max(120),
       slug: z.string().regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
@@ -262,6 +262,94 @@ export const tools: ToolDef[] = [
     body: (a) => ({ api_key: a.api_key, domain: a.domain }), readOnly: false,
   },
   {
+    name: "connect_meta_ads",
+    description: "Connect Meta Ads by storing a user/system-user token (encrypted) and optional ad account id. Adult-adjacent projects are refused. Omit ad_account_id to discover accounts, then call again with one. For 1-click OAuth, use connect_meta_start.",
+    input: z.object({
+      product_slug: slug,
+      access_token: z.string().describe("Meta token with ads_read."),
+      ad_account_id: z.string().optional().describe("Numeric ad account id, no act_ prefix."),
+    }),
+    method: "POST", path: (a) => `/products/${a.product_slug}/connections/meta-ads`,
+    body: (a) => ({ access_token: a.access_token, ad_account_id: a.ad_account_id }), readOnly: false,
+  },
+  {
+    name: "connect_meta_start",
+    description: "Begin connecting Meta Ads and/or Meta Social via OAuth. Returns an authorization URL for the user to open, then poll connect_meta_status with the returned state.",
+    input: z.object({
+      product_slug: slug,
+      kinds: z.array(z.enum(["meta_ads", "meta_social"])).min(1).optional()
+        .describe("Meta kinds to connect (meta_ads, meta_social). Default is ['meta_ads']."),
+    }),
+    method: "POST", path: () => "/connect/meta/start",
+    body: (a) => ({
+      product_slug: a.product_slug,
+      kinds: (a.kinds as string[] | undefined)?.length ? a.kinds : ["meta_ads"],
+      client: "mcp",
+    }),
+    readOnly: false,
+  },
+  {
+    name: "connect_meta_status",
+    description: "Poll an in-progress Meta connection. pending → keep waiting; complete → results plus discovered ad accounts and pages; error → what went wrong.",
+    input: z.object({ state: z.string() }),
+    method: "GET", path: (a) => `/connect/meta/status?state=${encodeURIComponent(String(a.state))}`, readOnly: true,
+  },
+  {
+    name: "connect_meta_select",
+    description: "Finish a Meta OAuth connection by choosing which Meta Ad Account and/or Facebook Page to track, from the options returned by connect_meta_status.",
+    input: z.object({
+      state: z.string(),
+      ad_account_id: z.string().optional().describe("Numeric ad account id, no act_ prefix."),
+      page_id: z.string().optional().describe("Facebook Page id."),
+    }),
+    method: "POST", path: () => "/connect/meta/select", body: (a) => a, readOnly: false,
+  },
+  {
+    name: "connect_linkedin_ads",
+    description: "Connect LinkedIn Ads by storing a token with r_ads + r_ads_reporting (encrypted) and optional ad account id. Omit ad_account_id to discover.",
+    input: z.object({
+      product_slug: slug,
+      access_token: z.string().describe("LinkedIn Marketing token."),
+      ad_account_id: z.string().optional().describe("Numeric sponsored account id."),
+    }),
+    method: "POST", path: (a) => `/products/${a.product_slug}/connections/linkedin-ads`,
+    body: (a) => ({ access_token: a.access_token, ad_account_id: a.ad_account_id }), readOnly: false,
+  },
+  {
+    name: "connect_meta_social",
+    description: "Connect Meta Social (Facebook Page + linked Instagram) by storing a user token (encrypted) and optional Page id. Omit page_id to discover.",
+    input: z.object({
+      product_slug: slug,
+      access_token: z.string().describe("Meta token with pages_show_list and pages_read_engagement."),
+      page_id: z.string().optional().describe("Facebook Page id."),
+    }),
+    method: "POST", path: (a) => `/products/${a.product_slug}/connections/meta-social`,
+    body: (a) => ({ access_token: a.access_token, page_id: a.page_id }), readOnly: false,
+  },
+  {
+    name: "connect_x_social",
+    description: "Connect X (Twitter) Social by storing a Bearer token (encrypted) and username. Daily public_metrics and recent tweets are ingested.",
+    input: z.object({
+      product_slug: slug,
+      bearer_token: z.string().describe("X API v2 Bearer token."),
+      username: z.string().describe("X username without @."),
+    }),
+    method: "POST", path: (a) => `/products/${a.product_slug}/connections/x-social`,
+    body: (a) => ({ bearer_token: a.bearer_token, username: a.username }), readOnly: false,
+  },
+  {
+    name: "connect_stripe",
+    description: "Connect Stripe by storing a Restricted or Secret API key (encrypted). Successful charges become converted/payment events plus revenue; refunds and open/lost disputes write negative ledger rows. Prefer a Restricted key with Charges, Customers, Refunds and Disputes read.",
+    input: z.object({
+      product_slug: slug,
+      api_key: z.string().describe("Stripe Restricted or Secret key (rk_live_… / sk_live_…, or _test_)."),
+      default_stage: z.enum(["converted", "payment"]).optional()
+        .describe("Funnel stage for a successful charge. Defaults to converted."),
+    }),
+    method: "POST", path: (a) => `/products/${a.product_slug}/connections/stripe`,
+    body: (a) => ({ api_key: a.api_key, default_stage: a.default_stage }), readOnly: false,
+  },
+  {
     name: "set_posthog_event_maps",
     description: "Replace which PostHog events count as which funnel stages. Each mapped event is ingested as daily aggregate stage rows. Map each stage from ONE source — a stage fed by both PostHog and GA4 double-counts.",
     input: z.object({
@@ -300,16 +388,16 @@ export const tools: ToolDef[] = [
   {
     name: "test_connection",
     description: "Verify a connected source can deliver data (cheap, side-effect-free probe).",
-    input: z.object({ product_slug: slug, kind: z.enum(["ga4", "gtm", "google_ads", "gsc", "semrush", "mysql", "postgres", "mongo", "clarity", "posthog", "opinly", "bing", "ahrefs"]) }),
+    input: z.object({ product_slug: slug, kind: z.enum(["ga4", "gtm", "google_ads", "gsc", "semrush", "mysql", "postgres", "mongo", "clarity", "posthog", "opinly", "bing", "ahrefs", "meta_ads", "linkedin_ads", "meta_social", "x_social", "stripe"]) }),
     method: "POST", path: (a) => `/products/${a.product_slug}/connections/${a.kind}/test`, readOnly: false,
   },
   {
     name: "detect_website_integrations",
     description:
-      "Inspect a website URL or product domain to auto-detect active analytics, pixels, tag managers, CRM, payments, and tracking scripts (GA4, GTM, Google Ads, Microsoft Clarity, PostHog, FunnelKeeper tracking, Meta Pixel, TikTok, LinkedIn, Stripe, Hotjar, Segment, Plausible, Shopify, Webflow, etc.) and recommend FunnelKeeper connections.",
+      "Inspect a website URL or project domain to auto-detect active analytics, pixels, tag managers, CRM, payments, and tracking scripts (GA4, GTM, Google Ads, Microsoft Clarity, PostHog, FunnelKeeper tracking, Meta Pixel, TikTok, LinkedIn, Stripe, Hotjar, Segment, Plausible, Shopify, Webflow, etc.) and recommend FunnelKeeper connections.",
     input: z.object({
-      product_slug: slug.optional().describe("Product slug if inspecting an existing product in FunnelKeeper (will cross-reference existing connections)."),
-      url: z.string().optional().describe("Website URL to scan (e.g. 'https://motormerchants.com.au'). If omitted and product_slug is provided, uses the product's domain."),
+      product_slug: slug.optional().describe("Project slug if inspecting an existing project in FunnelKeeper (will cross-reference existing connections)."),
+      url: z.string().optional().describe("Website URL to scan (e.g. 'https://motormerchants.com.au'). If omitted and product_slug is provided, uses the project's domain."),
     }),
     method: "POST",
     path: (a) => (a.product_slug ? `/products/${a.product_slug}/detect-integrations` : `/tools/detect-integrations`),
@@ -320,7 +408,7 @@ export const tools: ToolDef[] = [
     name: "sync_connection",
     description:
       "Run a source now instead of waiting for the sweep (hourly for databases, daily for GA4 and PostHog), and clear any backoff so a corrected connection recovers immediately. Use this straight after setting event maps or credentials — a connection that has never synced starts a staged backfill (30 days so the dashboard populates, then a year, then everything the plan allows), so the surfaces fill rather than sitting empty. Returns when the run STARTS; poll list_connections for status/last_sync_at/last_error and backfill_days, which is how deep it has read so far. SEMrush and Clarity are excluded: their quotas deplete. Opinly is included — its snapshot reads stored company data.",
-    input: z.object({ product_slug: slug, kind: z.enum(["mysql", "postgres", "mongo", "ga4", "posthog", "opinly", "gsc", "bing"]) }),
+    input: z.object({ product_slug: slug, kind: z.enum(["mysql", "postgres", "mongo", "ga4", "posthog", "opinly", "gsc", "bing", "meta_ads", "linkedin_ads", "meta_social", "x_social", "stripe"]) }),
     method: "POST", path: (a) => `/products/${a.product_slug}/connections/${a.kind}/sync`, readOnly: false,
   },
   {
@@ -338,6 +426,7 @@ export const tools: ToolDef[] = [
         attribution: z.object({
           channel: z.string().optional(), utm_source: z.string().optional(), utm_medium: z.string().optional(),
           utm_campaign: z.string().optional(), gclid: z.string().optional(), fbclid: z.string().optional(),
+          li_fat_id: z.string().optional(),
           referrer: z.string().optional(),
           campaign_id: z.string().optional().describe("ValueTrack {campaignid}."),
           ad_group_id: z.string().optional().describe("ValueTrack {adgroupid}."),
@@ -351,6 +440,7 @@ export const tools: ToolDef[] = [
           currency: z.string().length(3).optional(),
           kind: z.enum(["charge", "usage", "invoice", "refund", "dispute", "adjustment"]).optional(),
         }).optional(),
+        score: z.union([z.string(), z.number()]).optional().describe("Optional lead grade ('A', 'B', 'C', 'D') or numeric score (e.g. 85)."),
         props: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
       })).min(1).max(500),
     }),
@@ -360,7 +450,7 @@ export const tools: ToolDef[] = [
   {
     name: "get_tracking_snippet",
     description:
-      "The product's publishable write key (fk_pub_…) plus copy-paste <script> tag, GTM Custom HTML, and a server-side curl example. key is null until rotate_tracking_key has been called.",
+      "The project's publishable write key (fk_pub_…) plus copy-paste <script> tag, GTM Custom HTML, and a server-side curl example. key is null until rotate_tracking_key has been called.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}/tracking-key`, readOnly: true,
   },
@@ -381,7 +471,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_spend",
-    description: "Daily spend by channel and campaign for a product, with the daily cap and whether it is currently binding.",
+    description: "Daily spend by channel and campaign for a project, with the daily cap and whether it is currently binding.",
     input: z.object({ product_slug: slug, days: z.number().int().positive().max(365).default(30) }),
     method: "GET", path: (a) => `/products/${a.product_slug}/spend?days=${a.days ?? 30}`, readOnly: true,
   },
@@ -453,7 +543,7 @@ export const tools: ToolDef[] = [
   {
     name: "get_ads_url_suffix",
     description:
-      "Whether the product's Google Ads account tags its landing URLs with the ValueTrack parameters keyword- and creative-level ROI depends on. Returns the account's current final URL suffix, whether auto-tagging is on, which params are missing, and the exact string to add. Read-only.",
+      "Whether the project's Google Ads account tags its landing URLs with the ValueTrack parameters keyword- and creative-level ROI depends on. Returns the account's current final URL suffix, whether auto-tagging is on, which params are missing, and the exact string to add. Read-only.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}/connections/google-ads/url-suffix`, readOnly: true,
   },
@@ -466,27 +556,34 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_timeseries",
-    description: "Daily spend, revenue, visits, leads and new customers for a product — zero-filled, oldest first.",
+    description: "Daily spend, revenue, visits, leads and new customers for a project — zero-filled, oldest first.",
     input: z.object({ slug, days: z.number().int().positive().max(365).default(90) }),
     method: "GET", path: (a) => `/products/${a.slug}/timeseries?days=${a.days ?? 90}`, readOnly: true,
   },
   {
     name: "get_health_report",
-    description: "Scored audit of the product (0–100): site & tracking, funnel, advertising, SEO & social. Every failing check carries the action that fixes it.",
+    description: "Scored audit of the project (0–100): site & tracking, funnel, advertising, SEO & social. Every failing check carries the action that fixes it.",
     input: z.object({ slug, days: z.number().int().positive().max(365).default(30) }),
     method: "GET", path: (a) => `/products/${a.slug}/health-report?days=${a.days ?? 30}`, readOnly: true,
   },
   {
     name: "get_demand_report",
     description:
-      "Demand-gen report for a product: search impressions/clicks, top queries with striking-distance and low-CTR flags, keyword ranks across SEMrush/Ahrefs/Opinly, AI visibility, and authority. Empty sources still return so you can see what to connect.",
+      "Demand-gen report for a project: search impressions/clicks, top queries with striking-distance and low-CTR flags, keyword ranks across SEMrush/Ahrefs/Opinly, AI visibility, and authority. Empty sources still return so you can see what to connect.",
     input: z.object({ slug, days: z.number().int().positive().max(365).default(30) }),
     method: "GET", path: (a) => `/products/${a.slug}/demand?days=${a.days ?? 30}`, readOnly: true,
   },
   {
+    name: "get_social_report",
+    description:
+      "Organic social report: follower totals, reach, engagement rate, per-network split (Meta vs X), and top posts. Empty sources still return so you can see what to connect.",
+    input: z.object({ slug, days: z.number().int().positive().max(365).default(30) }),
+    method: "GET", path: (a) => `/products/${a.slug}/social?days=${a.days ?? 30}`, readOnly: true,
+  },
+  {
     name: "get_growth_actions",
     description:
-      "Ranked next incremental changes that will generate revenue or growth for this product: activation leaks, friction, wasted spend, missing conversions, weak landing pages. Each row includes estimated monthly impact and a copy-paste prompt for a coding agent. Ask this before inventing a feature. Spend changes are listed as proposals only — never execute them.",
+      "Ranked next incremental changes that will generate revenue or growth for this project: activation leaks, friction, wasted spend, missing conversions, weak landing pages. Each row includes estimated monthly impact and a copy-paste prompt for a coding agent. Ask this before inventing a feature. Spend changes are listed as proposals only — never execute them.",
     input: z.object({
       slug,
       days: z.number().int().positive().max(365).default(30),
@@ -514,7 +611,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_landing_pages",
-    description: "Landing pages for a product: path, conversion characteristics (sessions, engagement, conversions vs the previous window), and the latest AI quality score if analysed.",
+    description: "Landing pages for a project: path, conversion characteristics (sessions, engagement, conversions vs the previous window), and the latest AI quality score if analysed.",
     input: z.object({ slug, days: z.number().int().positive().max(365).default(30) }),
     method: "GET", path: (a) => `/products/${a.slug}/landing-pages?days=${a.days ?? 30}`, readOnly: true,
   },
@@ -566,7 +663,7 @@ export const tools: ToolDef[] = [
     name: "get_history",
     description: "The audit timeline: every change and decision — Keeper cards raised, human approvals (resolved_by), policy blocks, config edits — newest first.",
     input: z.object({
-      product_slug: z.string().optional().describe("Limit to one product."),
+      product_slug: z.string().optional().describe("Limit to one project."),
       days: z.number().int().positive().max(365).default(90),
       limit: z.number().int().positive().max(500).default(200),
     }),
@@ -577,13 +674,13 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_funnel_definition",
-    description: "The product's funnel definition (ordered, labelled steps) plus per-stage tracking status: recent volume and which sources feed each canonical stage.",
+    description: "The project's funnel definition (ordered, labelled steps) plus per-stage tracking status: recent volume and which sources feed each canonical stage.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}/funnel/definition`, readOnly: true,
   },
   {
     name: "set_funnel_definition",
-    description: "Save the product's funnel steps. Stages must come from the canonical taxonomy (impression, visit, engaged, lead, qualified, signup, activated, converted, payment, churned); labels are free text. Audited.",
+    description: "Save the project's funnel steps. Stages must come from the canonical taxonomy (impression, visit, engaged, lead, qualified, signup, activated, converted, payment, churned); labels are free text. Audited.",
     input: z.object({
       slug,
       steps: z.array(z.object({ stage: z.string(), label: z.string().min(1).max(40) })).min(2).max(10),
@@ -593,31 +690,35 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_conversions",
-    description: "The product's conversion definitions — primary (the money event) and secondary (milestones) — each with its stage, source, value mode and 30-day count/value.",
+    description: "The project's conversion definitions — primary (the money event) and secondary (milestones) — each with its stage, source, value mode and 30-day count/value.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}/conversions`, readOnly: true,
   },
   {
     name: "save_conversion",
-    description: "Create or update a conversion definition (upserts by key). tier: primary = the money event (e.g. 'car sold'), secondary = a milestone ('car listed', 'offer accepted'). stage must be canonical taxonomy; source restricts to 'mysql', 'postgres', 'mongo' or 'ga4' (with event_name for one GA4 event). value_mode: 'transaction' reads each conversion's own revenue row from the source DB (dynamic values), 'fixed' uses fixed_value_cents + currency, 'none' counts only. Audited.",
+    description: "Create or update a conversion definition (upserts by key). tier: primary = core bottom-of-funnel goal event (e.g. 'waitlist-joined' or 'car-sold'), secondary = a milestone ('car-listed', 'demo-scheduled'). stage must be canonical taxonomy; source restricts to 'mysql', 'postgres', 'mongo', 'ga4' or 'stripe' (with event_name for one GA4 event). value_mode: 'transaction' reads each conversion's own revenue row from the source (dynamic values), 'fixed' uses fixed_value_cents + currency, 'none' counts only. score_mode: 'none' (default), 'grade' (A/B/C/D categorical qualification), or 'numeric' (point score). target_cpa_cents: optional target cost per acquisition in cents. Audited.",
     input: z.object({
       product_slug: slug,
-      key: z.string().describe("Stable slug, e.g. 'car-sold'."),
+      key: z.string().describe("Stable slug, e.g. 'car-sold' or 'waitlist-signup'."),
       label: z.string().min(1).max(60),
       tier: z.string().describe("'primary' or 'secondary'."),
       stage: z.string().describe("Canonical stage (impression, visit, engaged, lead, qualified, signup, activated, converted, payment, churned)."),
-      source: z.string().optional().describe("'mysql', 'postgres', 'mongo' or 'ga4'; omit for any source."),
+      source: z.string().optional().describe("'mysql', 'postgres', 'mongo', 'ga4' or 'stripe'; omit for any source."),
       event_name: z.string().optional().describe("GA4 only: count just this event."),
       value_mode: z.string().optional().describe("'none' (default), 'fixed', or 'transaction'."),
       fixed_value_cents: z.number().int().optional(),
       currency: z.string().optional(),
+      score_mode: z.string().optional().describe("'none' (default), 'grade', or 'numeric'."),
+      target_cpa_cents: z.number().int().positive().optional().describe("Target CPA in cents."),
+      grade_weights: z.record(z.number()).optional(),
       is_active: z.boolean().optional(),
     }),
     method: "POST", path: (a) => `/products/${a.product_slug}/conversions`,
     body: (a) => ({
       key: a.key, label: a.label, tier: a.tier, stage: a.stage, source: a.source,
       event_name: a.event_name, value_mode: a.value_mode, fixed_value_cents: a.fixed_value_cents,
-      currency: a.currency, is_active: a.is_active,
+      currency: a.currency, score_mode: a.score_mode, target_cpa_cents: a.target_cpa_cents,
+      grade_weights: a.grade_weights, is_active: a.is_active,
     }),
     readOnly: false,
   },
@@ -649,7 +750,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "connect_mysql",
-    description: "Connect the product's MySQL database. Tenants pass `credentials` (host/port/user/password/database — encrypted at rest; use a READ-ONLY user, ideally on a replica). Operators may instead pass *_env NAMES resolved on the API host. event_maps turn source tables into funnel events, identities, channels (attribution columns) and revenue (the dynamic per-row values 'transaction'-mode conversions read).",
+    description: "Connect the project's MySQL database. Tenants pass `credentials` (host/port/user/password/database — encrypted at rest; use a READ-ONLY user, ideally on a replica). Operators may instead pass *_env NAMES resolved on the API host. event_maps turn source tables into funnel events, identities, channels (attribution columns) and revenue (the dynamic per-row values 'transaction'-mode conversions read).",
     input: z.object({
       product_slug: slug,
       credentials: z.object({
@@ -670,6 +771,7 @@ export const tools: ToolDef[] = [
           channel_col: z.string().optional(), utm_source_col: z.string().optional(),
           utm_medium_col: z.string().optional(), utm_campaign_col: z.string().optional(),
           gclid_col: z.string().optional(), fbclid_col: z.string().optional(),
+          li_fat_id_col: z.string().optional(),
           referrer_col: z.string().optional(),
         }).optional(),
         revenue: z.object({
@@ -716,7 +818,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "connect_postgres",
-    description: "Connect the product's Postgres database (tenant-only). Pass `credentials` (host/port/user/password/database, optional schema — encrypted at rest; use a READ-ONLY role, ideally on a replica) plus event_maps — the data-not-code mapping from source tables to funnel stages, identities, attribution channels and revenue. Each map may set `schema` to reach a non-public schema.",
+    description: "Connect the project's Postgres database (tenant-only). Pass `credentials` (host/port/user/password/database, optional schema — encrypted at rest; use a READ-ONLY role, ideally on a replica) plus event_maps — the data-not-code mapping from source tables to funnel stages, identities, attribution channels and revenue. Each map may set `schema` to reach a non-public schema.",
     input: z.object({
       product_slug: slug,
       credentials: z.object({
@@ -734,6 +836,7 @@ export const tools: ToolDef[] = [
           channel_col: z.string().optional(), utm_source_col: z.string().optional(),
           utm_medium_col: z.string().optional(), utm_campaign_col: z.string().optional(),
           gclid_col: z.string().optional(), fbclid_col: z.string().optional(),
+          li_fat_id_col: z.string().optional(),
           referrer_col: z.string().optional(),
         }).optional(),
         revenue: z.object({
@@ -761,7 +864,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "connect_mongo",
-    description: "Connect the product's MongoDB database (tenant-only). Pass `credentials` with a single connection string `uri` (encrypted at rest — mongodb:// or mongodb+srv://; SRV, replica sets, TLS and authSource all live in the URI; use a read-only user) plus event_maps — collection-based maps from source documents to funnel stages, identities, attribution channels and revenue. Field paths may use dot notation to reach nested values.",
+    description: "Connect the project's MongoDB database (tenant-only). Pass `credentials` with a single connection string `uri` (encrypted at rest — mongodb:// or mongodb+srv://; SRV, replica sets, TLS and authSource all live in the URI; use a read-only user) plus event_maps — collection-based maps from source documents to funnel stages, identities, attribution channels and revenue. Field paths may use dot notation to reach nested values.",
     input: z.object({
       product_slug: slug,
       credentials: z.object({
@@ -777,6 +880,7 @@ export const tools: ToolDef[] = [
           channel_field: z.string().optional(), utm_source_field: z.string().optional(),
           utm_medium_field: z.string().optional(), utm_campaign_field: z.string().optional(),
           gclid_field: z.string().optional(), fbclid_field: z.string().optional(),
+          li_fat_id_field: z.string().optional(),
           referrer_field: z.string().optional(),
         }).optional(),
         revenue: z.object({
@@ -804,7 +908,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_dashboards",
-    description: "The product's saved dashboards (name + widget spec). The built-in Overview is not stored.",
+    description: "The project's saved dashboards (name + widget spec). The built-in Overview is not stored.",
     input: z.object({ slug }),
     method: "GET", path: (a) => `/products/${a.slug}/dashboards`, readOnly: true,
   },
@@ -853,5 +957,116 @@ export const tools: ToolDef[] = [
     input: z.object({ id: z.string().uuid(), actor, hours: z.number().int().positive().max(720).default(24) }),
     method: "POST", path: (a) => `/queue/${a.id}/snooze`, body: (a) => ({ actor: a.actor, snoozeHours: a.hours ?? 24 }),
     readOnly: false, destructive: true,
+  },
+  {
+    name: "get_scorecard",
+    description:
+      "Weekly growth scorecard for a project: a metrics × ISO-weeks matrix auto-filled from the warehouse, plus any manual cells the human typed. Weeks are completed ISO weeks (the running week is partial and misleading); set include_current to append it. History window follows the plan. Use this before inventing a weekly report.",
+    input: z.object({
+      slug,
+      weeks: z.number().int().positive().max(104).default(12),
+      include_current: z.boolean().default(false),
+    }),
+    method: "GET",
+    path: (a) => `/products/${a.slug}/scorecard?weeks=${a.weeks ?? 12}${a.include_current ? "&current=1" : ""}`,
+    readOnly: true,
+  },
+  {
+    name: "get_scorecard_insights",
+    description:
+      "Scorecard analysis for a project: cell highlights plus typed cards (insight / query / action). Deterministic on every plan; LLM-enriched on Growth. Never proposes spend changes.",
+    input: z.object({
+      slug,
+      weeks: z.number().int().positive().max(104).default(12),
+    }),
+    method: "GET",
+    path: (a) => `/products/${a.slug}/scorecard/insights?weeks=${a.weeks ?? 12}`,
+    readOnly: true,
+  },
+  {
+    name: "set_scorecard",
+    description:
+      "Replace the project's scorecard definition (sections and metrics). Auto metrics must use catalog keys. Does not write warehouse facts.",
+    input: z.object({
+      slug,
+      sections: z.array(z.object({
+        id: z.string(),
+        label: z.string(),
+        metrics: z.array(z.object({
+          key: z.string(),
+          label: z.string(),
+          kind: z.enum(["auto", "manual", "derived"]),
+          metric_ref: z.string().optional(),
+          formula: z.string().optional(),
+          format: z.enum(["int", "cents", "percent"]),
+          target: z.number().nullable().optional(),
+        })),
+      })),
+      template: z.string().nullable().optional(),
+    }),
+    method: "POST",
+    path: (a) => `/products/${a.slug}/scorecard`,
+    body: (a) => ({ sections: a.sections, template: a.template }),
+    readOnly: false,
+  },
+  {
+    name: "record_scorecard_values",
+    description:
+      "Write manual scorecard cells (blog posts, LinkedIn followers, …). week_start is the ISO Monday (YYYY-MM-DD). Null clears a cell. Audited.",
+    input: z.object({
+      slug,
+      actor,
+      cells: z.array(z.object({
+        metric_key: z.string(),
+        week_start: z.string().describe("ISO week Monday, YYYY-MM-DD."),
+        value: z.number().nullable(),
+      })).min(1),
+    }),
+    method: "POST",
+    path: (a) => `/products/${a.slug}/scorecard/values`,
+    body: (a) => ({ cells: a.cells }),
+    readOnly: false,
+  },
+  {
+    name: "suggest_scorecard",
+    description:
+      "Propose scorecard metrics from connected sources (LLM phrasing on Indie+). Proposals only — call set_scorecard after the human accepts.",
+    input: z.object({
+      slug,
+      prompt: z.string().max(400).optional(),
+    }),
+    method: "POST",
+    path: (a) => `/products/${a.slug}/scorecard/suggest`,
+    body: (a) => ({ prompt: a.prompt }),
+    readOnly: true,
+  },
+  {
+    name: "export_scorecard",
+    description: "Download the scorecard as CSV (Growth plan). For Excel use the dashboard export button.",
+    input: z.object({ slug, weeks: z.number().int().positive().max(104).default(12) }),
+    method: "GET",
+    path: (a) => `/products/${a.slug}/scorecard/export.csv?weeks=${a.weeks ?? 12}`,
+    readOnly: true,
+  },
+  {
+    name: "share_scorecard",
+    description: "Mint a public read-only URL for the project's weekly scorecard (build-in-public).",
+    input: z.object({ slug }),
+    method: "POST",
+    path: (a) => `/products/${a.slug}/scorecard/share`,
+    readOnly: false,
+  },
+  {
+    name: "chat",
+    description:
+      "Ask the Keeper in prose (same engine as the dashboard chat). Prefer a specific tool when you already know the call. Spend changes still become proposal cards.",
+    input: z.object({
+      message: z.string().min(1).max(8000),
+      product_slug: z.string().optional().describe("Default project scope."),
+    }),
+    method: "POST",
+    path: (a) => (a.product_slug ? `/products/${a.product_slug}/chat` : "/chat"),
+    body: (a) => ({ messages: [{ role: "user", content: a.message }] }),
+    readOnly: false,
   },
 ];

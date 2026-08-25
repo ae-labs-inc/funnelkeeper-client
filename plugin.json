@@ -1,0 +1,23 @@
+{
+  "name": "funnelkeeper",
+  "version": "0.2.0",
+  "description": "The growth and revenue engine for AI-built products: joins ad spend, funnel events, and revenue with 90+ MCP tools and human-in-the-loop ad ops.",
+  "author": {
+    "name": "AE Labs Inc",
+    "email": "engineering@aelabsinc.com",
+    "url": "https://funnelkeeper.com"
+  },
+  "homepage": "https://funnelkeeper.com/docs/mcp/",
+  "repository": "https://github.com/ae-labs-inc/funnelkeeper-client",
+  "license": "MIT",
+  "keywords": [
+    "funnelkeeper",
+    "analytics",
+    "marketing",
+    "mcp",
+    "attribution",
+    "growth",
+    "revenue",
+    "ad-ops"
+  ]
+}

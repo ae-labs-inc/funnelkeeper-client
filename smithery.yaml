@@ -1,0 +1,24 @@
+# Smithery configuration for FunnelKeeper MCP Server
+# https://smithery.ai/docs/build/session-config
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - apiKey
+    properties:
+      apiKey:
+        type: string
+        description: "FunnelKeeper account API key (fk_live_...)"
+      apiUrl:
+        type: string
+        description: "FunnelKeeper API base URL (default: https://api.funnelkeeper.com)"
+        default: "https://api.funnelkeeper.com"
+  commandFunction:
+    npx:
+      package: "funnelkeeper"
+      binary: "funnelkeeper-mcp"
+      args: []
+      env:
+        FUNNELKEEPER_API_KEY: "${config.apiKey}"
+        FUNNELKEEPER_API_URL: "${config.apiUrl}"

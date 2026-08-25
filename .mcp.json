@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "funnelkeeper": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "--package",
+        "funnelkeeper",
+        "funnelkeeper-mcp"
+      ],
+      "env": {
+        "FUNNELKEEPER_API_KEY": "${env:FUNNELKEEPER_API_KEY}"
+      }
+    }
+  }
+}

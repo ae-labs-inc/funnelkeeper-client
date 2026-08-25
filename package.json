@@ -26,7 +26,10 @@
     "dist",
     "README.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    ".mcp.json",
+    "plugin.json",
+    "smithery.yaml"
   ],
   "bin": {
     "fk": "dist/cli/index.js",
